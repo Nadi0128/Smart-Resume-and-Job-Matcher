@@ -205,11 +205,8 @@ print(f"Match score: {score:.2%}")
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📝 License
-
-[Add your license here]
+Arturo1s
+Nadi0128
 
 ## 🙏 Acknowledgments
 
