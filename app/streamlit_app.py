@@ -115,25 +115,22 @@ with st.sidebar:
             help="Hugging Face model for generating explanations",
             index=0
         )
-        hf_token = st.text_input(
-            "Hugging Face API Token",
-            value=st.session_state.hf_token,
-            type="password",
-            help="Your Hugging Face API token. Get one at https://huggingface.co/settings/tokens"
-        )
+        
+        # Get token from environment variables only (not from UI input)
+        hf_token = st.session_state.hf_token
+        
+        if not hf_token:
+            st.warning("⚠️ Hugging Face API token not found. Set HUGGINGFACE_API_TOKEN or HF_API_KEY environment variable.")
         
         # Update session state
         st.session_state.llm_model = llm_model
-        st.session_state.hf_token = hf_token
         
-        # Initialize or reinitialize LLM analyzer if model or token changed
+        # Initialize or reinitialize LLM analyzer if model changed
         if 'llm_analyzer' not in st.session_state or \
-           st.session_state.get('last_llm_model') != llm_model or \
-           st.session_state.get('last_hf_token') != hf_token:
+           st.session_state.get('last_llm_model') != llm_model:
             try:
                 st.session_state.llm_analyzer = LLMAnalyzer(model_name=llm_model, hf_token=hf_token if hf_token else None)
                 st.session_state.last_llm_model = llm_model
-                st.session_state.last_hf_token = hf_token
                 if hf_token:
                     st.success("✅ LLM analyzer initialized!")
             except Exception as e:
