@@ -7,7 +7,7 @@ An AI-powered Resume and Job Matching System that uses embeddings, semantic sear
 - **Multi-format Support**: Process PDF, DOCX, and TXT resume files
 - **Semantic Matching**: Uses SentenceTransformers for contextual understanding beyond keyword matching
 - **Structured Extraction**: Automatically extracts skills, education, experience, certifications, and interests
-- **LLM-powered Analysis**: Generates human-like explanations for matches using Ollama
+- **LLM-powered Analysis**: Generates human-like explanations for matches using Hugging Face models (Llama-3.1-8B-Instruct via Inference API)
 - **Batch Matching**: Compare one resume against multiple jobs efficiently using FAISS
 - **Actionable Insights**: Provides recommendations and improvement suggestions
 
@@ -15,7 +15,8 @@ An AI-powered Resume and Job Matching System that uses embeddings, semantic sear
 
 - Python 3.8 or higher
 - pip (Python package manager)
-- (Optional) Ollama for LLM features - [Download here](https://ollama.ai)
+- **Hugging Face account and API token** for LLM features - [Get your free token here](https://huggingface.co/settings/tokens)
+  - The system uses the Llama-3.1-8B-Instruct model via Hugging Face Inference API
 
 ## 🚀 Quick Start
 
@@ -46,21 +47,24 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. (Optional) Set Up Ollama for LLM Features
+### 4. Set Up Hugging Face API Token for LLM Features
 
-If you want to use LLM-powered explanations:
+The application uses Hugging Face models for LLM-powered analysis. You must set up your Hugging Face API token:
 
-1. Install Ollama from [https://ollama.ai](https://ollama.ai)
-2. Start Ollama service:
+1. Create a free account at [https://huggingface.co](https://huggingface.co)
+2. Get your API token from [https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+3. Set the token as an environment variable:
    ```bash
-   ollama serve
+   # Windows (PowerShell)
+   $env:HUGGINGFACE_API_TOKEN="your_token_here"
+   
+   # Linux/Mac
+   export HUGGINGFACE_API_TOKEN="your_token_here"
    ```
-3. Pull a model (in a new terminal):
-   ```bash
-   ollama pull llama2
-   # or
-   ollama pull mistral
-   ```
+   **Alternative**: You can also set `HF_API_KEY` environment variable instead of `HUGGINGFACE_API_TOKEN`.
+   Or enter the token directly in the Streamlit app sidebar when prompted.
+
+**Note**: The app uses the `meta-llama/Llama-3.1-8B-Instruct` model by default. You can customize the model in the code by modifying the `model_name` parameter in `app/llm_analyzer.py`.
 
 ### 5. Run the Application
 
@@ -132,13 +136,26 @@ You can change the embedding model in the Streamlit sidebar:
 
 ### LLM Models
 
-If using Ollama, you can select different models:
-- `llama2` (default)
-- `llama3`
-- `mistral`
-- `codellama`
+The application uses **Hugging Face Inference API** for LLM-powered explanations:
 
-Change the Ollama URL if running on a different host/port.
+- **Default Model**: `meta-llama/Llama-3.1-8B-Instruct` (recommended)
+- **Other Available Models**: Any Hugging Face model compatible with the Inference API
+
+To use a different model, modify the `model_name` parameter in your code:
+
+```python
+from app.llm_analyzer import LLMAnalyzer
+
+# Use default model
+analyzer = LLMAnalyzer()
+
+# Or specify a custom model
+analyzer = LLMAnalyzer(model_name="meta-llama/Llama-3.1-70B-Instruct")
+```
+
+**Requirements**:
+- Valid Hugging Face API token (free tier available)
+- Token set as `HUGGINGFACE_API_TOKEN` or `HF_API_KEY` environment variable
 
 ## 🧪 Testing Individual Components
 
@@ -175,20 +192,21 @@ print(f"Match score: {score:.2%}")
 ## 📦 Dependencies
 
 - **streamlit**: Web application framework
-- **langchain** & **langchain-community**: LLM orchestration
-- **sentence-transformers**: Semantic embeddings
-- **pypdf**: PDF parsing
-- **python-docx**: DOCX parsing
-- **faiss-cpu**: Efficient similarity search
+- **huggingface_hub**: Hugging Face Inference API client for LLM-powered analysis
+- **sentence-transformers**: Semantic embeddings for resume-job matching
+- **pypdf**: PDF parsing and text extraction
+- **python-docx**: Microsoft Word document parsing
+- **faiss-cpu**: Efficient similarity search for batch matching
 - **numpy**: Numerical computations
-- **torch** & **transformers**: Deep learning models
+- **torch** & **transformers**: Deep learning models for embeddings
 
 ## 🐛 Troubleshooting
 
-### "Ollama connection error"
-- Make sure Ollama is running: `ollama serve`
-- Check the Ollama URL in the sidebar (default: `http://localhost:11434`)
-- The app will work without Ollama, but LLM features will be disabled
+### "Hugging Face API token error"
+- Make sure you have a valid Hugging Face API token
+- Get your token from [https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+- Enter the token in the sidebar or set it as `HUGGINGFACE_API_TOKEN` environment variable
+- The app will work without the token, but LLM features will be disabled
 
 ### "Import errors"
 - Make sure all dependencies are installed: `pip install -r requirements.txt`
@@ -211,6 +229,6 @@ Nadi0128
 ## 🙏 Acknowledgments
 
 - SentenceTransformers for semantic embeddings
-- LangChain for LLM orchestration
+- Hugging Face for LLM inference
 - Streamlit for the web interface
 - FAISS for efficient vector search

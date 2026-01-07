@@ -3,6 +3,15 @@ import os
 import sys
 from pathlib import Path
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Load .env file from project root
+    env_path = Path(__file__).parent.parent / '.env'
+    load_dotenv(dotenv_path=env_path)
+except ImportError:
+    pass  # python-dotenv not installed, skip loading .env file
+
 # Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -69,12 +78,12 @@ if 'matcher' not in st.session_state:
         st.error(f"❌ Error loading embedding model: {str(e)}")
         st.stop()
 
-if 'llm_analyzer' not in st.session_state:
-    try:
-        st.session_state.llm_analyzer = LLMAnalyzer()
-    except Exception as e:
-        st.warning(f"⚠️ LLM analyzer initialization warning: {str(e)}")
-        st.session_state.llm_analyzer = None
+# Initialize session state for LLM config
+if 'llm_model' not in st.session_state:
+    st.session_state.llm_model = "meta-llama/Llama-3.1-8B-Instruct"
+if 'hf_token' not in st.session_state:
+    # Try both HUGGINGFACE_API_TOKEN and HF_API_KEY for compatibility
+    st.session_state.hf_token = os.getenv("HUGGINGFACE_API_TOKEN") or os.getenv("HF_API_KEY") or ""
 
 # Main header
 st.markdown('<div class="main-header">🔍 Smart Resume and Job Matcher</div>', unsafe_allow_html=True)
@@ -96,14 +105,42 @@ with st.sidebar:
     if use_llm:
         llm_model = st.selectbox(
             "LLM Model",
-            ["llama2", "llama3", "mistral", "codellama"],
-            help="Ollama model for generating explanations"
+            [
+                "meta-llama/Llama-3.1-8B-Instruct",
+                "meta-llama/Llama-2-7b-chat-hf",
+                "meta-llama/Llama-2-13b-chat-hf",
+                "mistralai/Mistral-7B-Instruct-v0.2",
+                "google/flan-t5-large"
+            ],
+            help="Hugging Face model for generating explanations",
+            index=0
         )
-        ollama_url = st.text_input(
-            "Ollama URL",
-            value="http://localhost:11434",
-            help="Base URL for Ollama API"
+        hf_token = st.text_input(
+            "Hugging Face API Token",
+            value=st.session_state.hf_token,
+            type="password",
+            help="Your Hugging Face API token. Get one at https://huggingface.co/settings/tokens"
         )
+        
+        # Update session state
+        st.session_state.llm_model = llm_model
+        st.session_state.hf_token = hf_token
+        
+        # Initialize or reinitialize LLM analyzer if model or token changed
+        if 'llm_analyzer' not in st.session_state or \
+           st.session_state.get('last_llm_model') != llm_model or \
+           st.session_state.get('last_hf_token') != hf_token:
+            try:
+                st.session_state.llm_analyzer = LLMAnalyzer(model_name=llm_model, hf_token=hf_token if hf_token else None)
+                st.session_state.last_llm_model = llm_model
+                st.session_state.last_hf_token = hf_token
+                if hf_token:
+                    st.success("✅ LLM analyzer initialized!")
+            except Exception as e:
+                st.warning(f"⚠️ LLM analyzer initialization warning: {str(e)}")
+                st.session_state.llm_analyzer = None
+    else:
+        st.session_state.llm_analyzer = None
 
 # Main content tabs
 tab1, tab2, tab3 = st.tabs(["📄 Single Match", "📊 Batch Matching", "ℹ️ About"])
@@ -251,15 +288,24 @@ with tab1:
                 # Generate LLM explanation
                 if use_llm and st.session_state.llm_analyzer:
                     try:
-                        explanation = st.session_state.llm_analyzer.generate_match_explanation(
-                            resume_text, job_text, similarity_score,
-                            resume_info, job_info
-                        )
+                        with st.spinner("Generating LLM explanation..."):
+                            explanation = st.session_state.llm_analyzer.generate_match_explanation(
+                                resume_text, job_text, similarity_score,
+                                resume_info, job_info
+                            )
                         st.subheader("💡 Match Explanation")
                         st.markdown(f'<div class="info-box">{explanation}</div>', unsafe_allow_html=True)
                     except Exception as e:
-                        st.warning(f"Could not generate LLM explanation: {e}")
-                        st.info("Using fallback explanation.")
+                        error_msg = str(e)
+                        st.warning(f"Could not generate LLM explanation: {error_msg}")
+                        if "loading" in error_msg.lower():
+                            st.info("💡 The model is currently loading. Please wait a moment and try again.")
+                        elif "rate limit" in error_msg.lower() or "429" in error_msg:
+                            st.info("💡 API rate limit reached. Please try again later.")
+                        elif "401" in error_msg or "unauthorized" in error_msg.lower():
+                            st.info("💡 Authentication error. Please check your Hugging Face API token in the sidebar.")
+                        else:
+                            st.info("Using fallback explanation.")
                         if st.session_state.llm_analyzer:
                             explanation = st.session_state.llm_analyzer._fallback_explanation(
                                 resume_info, job_info, similarity_score
@@ -462,9 +508,9 @@ with tab3:
     
     - **Embeddings**: SentenceTransformers (all-MiniLM-L6-v2)
     - **Vector Search**: FAISS for efficient similarity search
-    - **LLM**: Ollama (Llama2, Mistral, etc.) for explanations
+    - **LLM**: Hugging Face Inference API (Llama2, Mistral, etc.) for explanations
     - **Framework**: Streamlit for the user interface
-    - **NLP**: LangChain for LLM orchestration
+    - **API**: Hugging Face Hub for LLM inference
     
     ### 📚 How It Works
     

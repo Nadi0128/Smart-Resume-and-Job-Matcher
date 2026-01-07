@@ -1,20 +1,21 @@
 from typing import Dict, List, Optional
 import os
+from pathlib import Path
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Load .env file from project root
+    env_path = Path(__file__).parent.parent / '.env'
+    load_dotenv(dotenv_path=env_path)
+except ImportError:
+    pass  # python-dotenv not installed, skip loading .env file
 
 try:
-    from langchain_community.llms import Ollama
-    from langchain.prompts import PromptTemplate
-    from langchain.chains import LLMChain
-    LANGCHAIN_AVAILABLE = True
+    from huggingface_hub import InferenceClient
+    HUGGINGFACE_AVAILABLE = True
 except ImportError:
-    try:
-        # Fallback for older langchain versions
-        from langchain.llms import Ollama
-        from langchain.prompts import PromptTemplate
-        from langchain.chains import LLMChain
-        LANGCHAIN_AVAILABLE = True
-    except ImportError:
-        LANGCHAIN_AVAILABLE = False
+    HUGGINGFACE_AVAILABLE = False
 
 
 class LLMAnalyzer:
@@ -23,27 +24,31 @@ class LLMAnalyzer:
     about resume-job matches.
     """
     
-    def __init__(self, model_name: str = "llama2", base_url: Optional[str] = None):
+    def __init__(self, model_name: str = "meta-llama/Llama-3.1-8B-Instruct", hf_token: Optional[str] = None):
         """
         Initialize LLM analyzer.
         
         Args:
-            model_name: Name of the Ollama model to use (default: "llama2")
-            base_url: Base URL for Ollama API (default: http://localhost:11434)
+            model_name: Name of the Hugging Face model to use (default: "meta-llama/Llama-3.1-8B-Instruct")
+            hf_token: Hugging Face API token (default: from HUGGINGFACE_API_TOKEN or HF_API_KEY env var)
         """
-        self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.model_name = model_name
+        # Try both HUGGINGFACE_API_TOKEN and HF_API_KEY for compatibility
+        self.hf_token = hf_token or os.getenv("HUGGINGFACE_API_TOKEN") or os.getenv("HF_API_KEY")
         
-        if not LANGCHAIN_AVAILABLE:
-            print("Warning: LangChain not available. Install with: pip install langchain langchain-community")
-            self.llm = None
+        if not HUGGINGFACE_AVAILABLE:
+            print("Warning: huggingface_hub not available. Install with: pip install huggingface_hub")
+            self.client = None
+        elif not self.hf_token:
+            print("Warning: Hugging Face API token not provided. Set HUGGINGFACE_API_TOKEN environment variable or pass hf_token parameter.")
+            print("Get your token from: https://huggingface.co/settings/tokens")
+            self.client = None
         else:
             try:
-                self.llm = Ollama(model=model_name, base_url=self.base_url)
+                self.client = InferenceClient(model=model_name, token=self.hf_token)
             except Exception as e:
-                print(f"Warning: Could not initialize Ollama. Using fallback mode. Error: {e}")
-                print("Make sure Ollama is running: ollama serve")
-                self.llm = None
+                print(f"Warning: Could not initialize Hugging Face client. Using fallback mode. Error: {e}")
+                self.client = None
     
     def generate_match_explanation(
         self, 
@@ -66,19 +71,16 @@ class LLMAnalyzer:
         Returns:
             Explanation text
         """
-        if not self.llm:
+        if not self.client:
             return self._fallback_explanation(resume_info, job_info, similarity_score)
         
-        prompt_template = PromptTemplate(
-            input_variables=["resume_text", "job_text", "similarity_score"],
-            template="""
-You are an expert career advisor and recruiter. Analyze the match between a candidate's resume and a job description.
+        prompt = f"""You are an expert career advisor and recruiter. Analyze the match between a candidate's resume and a job description.
 
 Resume Summary:
-{resume_text}
+{resume_text[:2000]}
 
 Job Description:
-{job_text}
+{job_text[:2000]}
 
 Similarity Score: {similarity_score:.2%}
 
@@ -87,21 +89,32 @@ Provide a detailed explanation (2-3 paragraphs) explaining:
 2. Key strengths and relevant experience/skills
 3. Any potential gaps or areas for improvement
 
-Be specific and reference actual skills, experiences, or qualifications mentioned in both documents.
-"""
-        )
+Be specific and reference actual skills, experiences, or qualifications mentioned in both documents."""
         
         try:
-            chain = LLMChain(llm=self.llm, prompt=prompt_template)
-            explanation = chain.run(
-                resume_text=resume_text[:2000],  # Limit length
-                job_text=job_text[:2000],
-                similarity_score=similarity_score
+            # Use chat_completion API (works with instruct/chat models)
+            response = self.client.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=512,
+                temperature=0.7,
+                top_p=0.95
             )
-            return explanation.strip()
+            # Extract content from response
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"Error generating LLM explanation: {e}")
-            return self._fallback_explanation(resume_info, job_info, similarity_score)
+            error_msg = str(e)
+            print(f"Error generating LLM explanation: {error_msg}")
+            # Check for specific error types
+            if "Model" in error_msg and ("loading" in error_msg.lower() or "not ready" in error_msg.lower()):
+                return self._fallback_explanation(resume_info, job_info, similarity_score) + "\n\n(Note: Model is loading, please try again in a moment)"
+            elif "rate limit" in error_msg.lower() or "429" in error_msg:
+                return self._fallback_explanation(resume_info, job_info, similarity_score) + "\n\n(Note: API rate limit reached, please try again later)"
+            elif "401" in error_msg or "unauthorized" in error_msg.lower() or "authentication" in error_msg.lower():
+                return self._fallback_explanation(resume_info, job_info, similarity_score) + "\n\n(Note: Invalid API token. Please check your Hugging Face token)"
+            elif "403" in error_msg or "forbidden" in error_msg.lower():
+                return self._fallback_explanation(resume_info, job_info, similarity_score) + "\n\n(Note: Access denied. This model may require special access. Try a different model.)"
+            else:
+                return self._fallback_explanation(resume_info, job_info, similarity_score)
     
     def analyze_missing_skills(
         self,
@@ -162,30 +175,30 @@ Be specific and reference actual skills, experiences, or qualifications mentione
         Returns:
             List of improvement suggestions
         """
-        if not self.llm:
+        if not self.client:
             return self._fallback_suggestions()
         
-        prompt_template = PromptTemplate(
-            input_variables=["resume_text", "job_text"],
-            template="""
-You are a career coach. Review this resume against a job description and provide 3-5 specific, actionable suggestions to improve the resume's alignment with the job.
+        prompt = f"""You are a career coach. Review this resume against a job description and provide 3-5 specific, actionable suggestions to improve the resume's alignment with the job.
 
 Resume:
-{resume_text}
+{resume_text[:1500]}
 
 Job Description:
-{job_text}
+{job_text[:1500]}
 
-Provide suggestions as a numbered list. Be specific and actionable.
-"""
-        )
+Provide suggestions as a numbered list. Be specific and actionable."""
         
         try:
-            chain = LLMChain(llm=self.llm, prompt=prompt_template)
-            suggestions_text = chain.run(
-                resume_text=resume_text[:1500],
-                job_text=job_text[:1500]
+            # Use chat_completion API
+            response = self.client.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=256,
+                temperature=0.7,
+                top_p=0.95
             )
+            
+            # Extract content from response
+            suggestions_text = response.choices[0].message.content
             
             # Parse suggestions into list
             suggestions = [
